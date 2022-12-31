@@ -1,0 +1,132 @@
+import { isLetterCodePoint,  isDigitCodePoint, isUpperCodePoint } from '../char/mod.ts';
+import { randomBytes } from '../random/mod.ts';
+
+export function validate(data: Uint8Array) {
+    let isDigit = false;
+    let isUpperCase = false;
+    let isLowerCase = false;
+    let isSpecial = false;
+    for (let i = 0; i < data.length; i++) {
+        const c = data[i];
+        // throw?
+        if (c === undefined) {
+            continue;
+        }
+        
+        if (isLetterCodePoint(c)) {
+            
+            if (isUpperCodePoint(c)) {
+                isUpperCase = true;
+                continue;
+            }
+
+            isLowerCase = true;
+            continue;
+        }
+
+        if (isDigitCodePoint(c)) {
+            isDigit = true;
+            continue;
+        }
+
+        isSpecial = true;
+    }
+
+    return isDigit && isLowerCase && isUpperCase && isSpecial;
+}
+
+export interface ISecretGenerator {
+    setValidator(validator: (value: Uint8Array) => boolean): void;
+    add(value: string): ISecretGenerator;
+    generate(length: number): string;
+    generateAsUint8Array(length: number): Uint8Array;
+}
+
+export class SecretGenerator implements ISecretGenerator {
+    #codes: number[];
+    #validator: (value: Uint8Array) => boolean;
+
+    constructor() {
+        this.#codes = [];
+        this.#validator = validate;
+    }
+
+    setValidator(validator: (value: Uint8Array) => boolean) {
+        this.#validator = validator;
+    }
+
+    addDefaults() {
+        this.add(
+            'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-#@~`~:{}',
+        );
+        return this;
+    }
+
+    add(value: string) {
+        for (let i = 0; i < value.length; i++) {
+            const c = value.codePointAt(i);
+            if (c === undefined) {
+                continue;
+            }
+
+            if (this.#codes.includes(c)) {
+                continue;
+            }
+
+            this.#codes.push(c);
+        }
+
+        return this;
+    }
+
+    generateAsUint8Array(length: number): Uint8Array {
+        // useful for generating as password that can be cleared from memory
+        // as strings are immutable in javascript
+        let valid = false;
+        const chars: Uint8Array = new Uint8Array(length);
+        const maxAttempts = 500;
+        let attempts = 0;
+
+        // if the validator logic and characters don't match
+        // this can get into an infinite loop.
+        // and if you hit 500 and you use the defaults, you have 
+        // really bad luck with the rng gods.
+        while (!valid && attempts < maxAttempts) {
+            chars.fill(0);
+            const bytes = randomBytes(length);
+            
+            for (let i = 0; i < length; i++) {
+                const bit = (Math.abs(bytes[i]) % this.#codes.length);
+                chars[i] = this.#codes[bit];
+            }
+
+            attempts++;
+            valid = this.#validator(chars);
+        }
+
+        if (!valid) {
+            throw new Error('Failed to generate secret');
+        }
+
+        return chars;
+    }
+
+    generate(length: number) {
+        
+        const chars = this.generateAsUint8Array(length);
+        return String.fromCodePoint(...chars);
+    }
+}
+
+export function generateSecret(length: number, characters?: string) {
+    const generator = new SecretGenerator();
+    if (characters) {
+        generator.add(characters);
+    } else {
+        generator.addDefaults();
+    }
+
+    return generator.generate(length);
+}
+
+export const secretGenerator = new SecretGenerator().addDefaults();
